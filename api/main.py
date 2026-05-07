@@ -11,11 +11,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─── ROOT ───────────────────────────────────────────────────────────────────
 
 @app.get("/")
 def root():
     return {"status": "RouteAware API running"}
 
+# ─── TEAMMATE A: RAW EVENTS ─────────────────────────────────────────────────
 
 @app.get("/api/events")
 def get_events(limit: int = 100):
@@ -28,7 +30,6 @@ def get_events(limit: int = 100):
         return {"events": result.data, "count": len(result.data)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/events/route/{route_name}")
 def get_events_by_route(route_name: str):
@@ -43,7 +44,6 @@ def get_events_by_route(route_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/stats")
 def get_stats():
     try:
@@ -53,6 +53,107 @@ def get_stats():
             "total_scrapes": scrapes.count,
             "total_events": events.count,
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ─── ABDULLAH: CONFIDENCE SCORES ────────────────────────────────────────────
+
+@app.get("/api/segments")
+def get_all_segments():
+    """
+    Returns all route segments with their current confidence scores.
+    Frontend uses this to draw colored roads on the map.
+    """
+    try:
+        routes_response = supabase.table("routes").select("*").execute()
+        routes = routes_response.data
+
+        confidence_response = supabase.table("route_confidence").select("*").execute()
+        confidence_data = confidence_response.data
+
+        # Build lookup: route_id → most recent confidence record
+        confidence_lookup = {}
+        for item in confidence_data:
+            route_id = item["route_id"]
+            if route_id not in confidence_lookup:
+                confidence_lookup[route_id] = item
+            else:
+                if item["last_computed"] > confidence_lookup[route_id]["last_computed"]:
+                    confidence_lookup[route_id] = item
+
+        result = []
+        for route in routes:
+            route_id = route["id"]
+            confidence = confidence_lookup.get(route_id)
+            result.append({
+                "id": route_id,
+                "name": route["name"],
+                "from_place": route["from_place"],
+                "to_place": route["to_place"],
+                "start_lat": route.get("start_lat"),
+                "start_lng": route.get("start_lng"),
+                "end_lat": route.get("end_lat"),
+                "end_lng": route.get("end_lng"),
+                "confidence_score": confidence["confidence_score"] if confidence else 0.5,
+                "color": confidence["color"] if confidence else "gray",
+                "last_computed": confidence["last_computed"] if confidence else None
+            })
+
+        return {"segments": result}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/segments/{route_id}")
+def get_single_segment(route_id: int):
+    """
+    Returns one route segment with all its events.
+    Frontend calls this when user taps a road on the map.
+    """
+    try:
+        route_response = supabase.table("routes") \
+            .select("*") \
+            .eq("id", route_id) \
+            .execute()
+
+        if not route_response.data:
+            raise HTTPException(status_code=404, detail="Route not found")
+
+        route = route_response.data[0]
+
+        confidence_response = supabase.table("route_confidence") \
+            .select("*") \
+            .eq("route_id", route_id) \
+            .order("last_computed", desc=True) \
+            .limit(1) \
+            .execute()
+
+        confidence = confidence_response.data[0] if confidence_response.data else None
+
+        events_response = supabase.table("events") \
+            .select("*") \
+            .eq("route_id", route_id) \
+            .order("reported_at", desc=True) \
+            .execute()
+
+        return {
+            "id": route["id"],
+            "name": route["name"],
+            "from_place": route["from_place"],
+            "to_place": route["to_place"],
+            "start_lat": route.get("start_lat"),
+            "start_lng": route.get("start_lng"),
+            "end_lat": route.get("end_lat"),
+            "end_lng": route.get("end_lng"),
+            "confidence_score": confidence["confidence_score"] if confidence else 0.5,
+            "color": confidence["color"] if confidence else "gray",
+            "last_computed": confidence["last_computed"] if confidence else None,
+            "events": events_response.data
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
