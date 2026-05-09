@@ -1,6 +1,7 @@
-
+import threading
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from apscheduler.schedulers.background import BackgroundScheduler
 from database import supabase
 from planner import generate_trip_plan
 
@@ -13,13 +14,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── ROOT ───────────────────────────────────────────────────────────────────
+def run_confidence_scoring():
+    """Runs confidence scoring in the background."""
+    try:
+        from confidence import compute_all_scores
+        compute_all_scores()
+        print("Confidence scores updated.")
+    except Exception as e:
+        print(f"Confidence scoring error: {e}")
+
+# Start background scheduler when API starts
+scheduler = BackgroundScheduler()
+scheduler.add_job(run_confidence_scoring, 'interval', minutes=10)
+scheduler.start()
+
+# Run once immediately on startup
+threading.Thread(target=run_confidence_scoring).start()
+
+# ─── ROOT ────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 def root():
     return {"status": "RouteAware API running"}
 
-# ─── TEAMMATE A: RAW EVENTS ─────────────────────────────────────────────────
+# ─── TEAMMATE A: RAW EVENTS ──────────────────────────────────────────────────
 
 @app.get("/api/events")
 def get_events(limit: int = 100):
@@ -58,14 +76,10 @@ def get_stats():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ─── ABDULLAH: CONFIDENCE SCORES ────────────────────────────────────────────
+# ─── ABDULLAH: CONFIDENCE SCORES ─────────────────────────────────────────────
 
 @app.get("/api/segments")
 def get_all_segments():
-    """
-    Returns all route segments with their current confidence scores.
-    Frontend uses this to draw colored roads on the map.
-    """
     try:
         routes_response = supabase.table("routes").select("*").execute()
         routes = routes_response.data
@@ -73,7 +87,6 @@ def get_all_segments():
         confidence_response = supabase.table("route_confidence").select("*").execute()
         confidence_data = confidence_response.data
 
-        # Build lookup: route_id → most recent confidence record
         confidence_lookup = {}
         for item in confidence_data:
             route_id = item["route_id"]
@@ -109,10 +122,6 @@ def get_all_segments():
 
 @app.get("/api/segments/{route_id}")
 def get_single_segment(route_id: int):
-    """
-    Returns one route segment with all its events.
-    Frontend calls this when user taps a road on the map.
-    """
     try:
         route_response = supabase.table("routes") \
             .select("*") \
@@ -159,15 +168,10 @@ def get_single_segment(route_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ─── ABDULLAH: TRIP PLANNER ─────────────────────────────────────────────────
+# ─── ABDULLAH: TRIP PLANNER ──────────────────────────────────────────────────
 
 @app.get("/api/plan")
 def plan_trip(origin: str, destination: str, days: int = 3):
-    """
-    Generates a confidence-aware trip plan using Gemini.
-    
-    Example: /api/plan?origin=Islamabad&destination=Hunza&days=3
-    """
     try:
         result = generate_trip_plan(origin, destination, days)
         return result
