@@ -8,10 +8,8 @@ load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def get_route_conditions():
-    """Fetches all route segments with their confidence scores."""
     routes_response = supabase.table("routes").select("*").execute()
     routes = routes_response.data
-
     confidence_response = supabase.table("route_confidence").select("*").execute()
     confidence_data = confidence_response.data
 
@@ -63,8 +61,6 @@ def get_route_conditions():
 
 
 def generate_trip_plan(origin: str, destination: str, days: int):
-    """Generates a honest, confidence-aware trip plan using Groq."""
-
     conditions = get_route_conditions()
 
     conditions_text = ""
@@ -79,32 +75,25 @@ CRITICAL RULES YOU MUST FOLLOW:
 3. If a road is marked DANGEROUS, you MUST warn the user and suggest alternatives
 4. If a road is marked UNKNOWN, you MUST tell the user you don't have data and they should verify
 5. Never say a road is safe if the data says otherwise
-6. Always mention when data was last computed
 
 CURRENT ROAD CONDITIONS (real-time data):
 {conditions_text}
 
 Your response must include:
 - A day-by-day itinerary
-- Clear warnings for any dangerous roads on the route
+- Clear warnings for any dangerous roads
 - Alternative routes when primary route is dangerous
-- Honest disclosure when you don't have data for a segment
-- Practical advice (fuel stops, accommodation, timing)
-
-Remember: Your value is HONESTY. Other travel AIs give false confidence.
-You give real information or admit you don't know."""
+- Honest disclosure when you don't have data
+- Practical advice (fuel stops, accommodation, timing)"""
 
     user_message = f"""Plan a {days}-day trip from {origin} to {destination} in Pakistan's Northern Areas.
 
-Based on the current road conditions provided, give me:
-1. The recommended route with honest road condition warnings
+Give me:
+1. Recommended route with honest road condition warnings
 2. Day by day breakdown
-3. Any roads to avoid and why
+3. Roads to avoid and why
 4. Alternative routes if main route has hazards
-5. Key stops, fuel stations, and accommodation
-
-Be specific about which roads are safe, which are dangerous,
-and which you don't have data for."""
+5. Key stops, fuel stations, and accommodation"""
 
     try:
         response = client.chat.completions.create(
