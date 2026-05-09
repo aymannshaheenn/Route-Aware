@@ -1,6 +1,8 @@
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from database import supabase
+from planner import generate_trip_plan
 
 app = FastAPI(title="RouteAware API")
 
@@ -154,6 +156,21 @@ def get_single_segment(route_id: int):
 
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ─── ABDULLAH: TRIP PLANNER ─────────────────────────────────────────────────
+
+@app.get("/api/plan")
+def plan_trip(origin: str, destination: str, days: int = 3):
+    """
+    Generates a confidence-aware trip plan using Gemini.
+    
+    Example: /api/plan?origin=Islamabad&destination=Hunza&days=3
+    """
+    try:
+        result = generate_trip_plan(origin, destination, days)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

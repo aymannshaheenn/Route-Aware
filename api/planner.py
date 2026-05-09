@@ -1,12 +1,11 @@
 import os
 from dotenv import load_dotenv
-from google import genai
+from groq import Groq
 from database import supabase
 
 load_dotenv()
 
-# Configure Gemini
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def get_route_conditions():
     """Fetches all route segments with their confidence scores."""
@@ -16,7 +15,6 @@ def get_route_conditions():
     confidence_response = supabase.table("route_confidence").select("*").execute()
     confidence_data = confidence_response.data
 
-    # Build lookup: route_id → most recent confidence record
     confidence_lookup = {}
     for item in confidence_data:
         route_id = item["route_id"]
@@ -26,7 +24,6 @@ def get_route_conditions():
             if item["last_computed"] > confidence_lookup[route_id]["last_computed"]:
                 confidence_lookup[route_id] = item
 
-    # Combine routes with confidence scores
     conditions = []
     for route in routes:
         route_id = route["id"]
@@ -66,12 +63,10 @@ def get_route_conditions():
 
 
 def generate_trip_plan(origin: str, destination: str, days: int):
-    """Generates a honest, confidence-aware trip plan using Gemini."""
+    """Generates a honest, confidence-aware trip plan using Groq."""
 
-    # Get real road conditions from database
     conditions = get_route_conditions()
 
-    # Format conditions as readable text for Gemini
     conditions_text = ""
     for c in conditions:
         conditions_text += f"- {c['route']}: {c['status']} (score: {c['confidence_score']:.2f})\n"
@@ -112,13 +107,17 @@ Be specific about which roads are safe, which are dangerous,
 and which you don't have data for."""
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=system_prompt + "\n\n" + user_message
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            max_tokens=2000
         )
         return {
             "success": True,
-            "plan": response.text,
+            "plan": response.choices[0].message.content,
             "road_conditions": conditions
         }
     except Exception as e:
